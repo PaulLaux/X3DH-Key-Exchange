@@ -167,6 +167,14 @@ void blake_test(const char *p1, size_t n1, const char *p2, size_t n2, const char
     show_block(std::cout, "hash    ", h1, 64);
 }
 
+typedef struct {
+    Cu25519Mon ik_p;            // bob's identity key
+    Cu25519Mon spk_p;           // bob's signed pre-key
+    uint8_t    spk_p_sig[64];   // bob's signature on spk_bp using IK
+    Cu25519Mon opk_p;           // bob's one time pre-key
+} prekey_bundle;
+
+
 void x3dh() {
     /*
      ** Bob publish keys:
@@ -195,14 +203,48 @@ void x3dh() {
     cu25519_generate(&IK_Bs, &IK_Bp);
 
     // Human readable encoding of the public key.
-    std::string enc;
-    encode_key(IK_Bp.b, 32, enc, true);
-    format(std::cout, _("bob IK_B public key:    %s\n"), enc);
+//    std::string enc;
+//    encode_key(IK_Bp.b, 32, enc, true);
+//    format(std::cout, _("bob IK_B public key:    %s\n"), enc);
+    show_block(std::cout, "bob IK_B public key", IK_Bp.b, 32);
 
+    Cu25519Sec SPK_Bs;
+    Cu25519Mon SPK_Bp;
+    randombytes_buf(SPK_Bs.b, 32);
+    cu25519_generate(&SPK_Bs, &SPK_Bp);
+
+    show_block(std::cout, "bob SPK_B public key", SPK_Bp.b, 32);
+
+    // sign and verify SPK_Bp_sig on SPK_Bp
+    uint8_t SPK_Bp_sig[64];
+    curvesig("x3dh SPK_Bp_sig", SPK_Bp.b, 32, IK_Bp.b, IK_Bs.b, SPK_Bp_sig);
+    int errc = curverify("x3dh SPK_Bp_sig", SPK_Bp.b, 32, SPK_Bp_sig, IK_Bp.b);
+    format(std::cout, "curverify returns %d\n", errc);
+    show_block(std::cout, "bob SPK_Bp_sig public key", SPK_Bp_sig, 64);
+
+    Cu25519Sec OPK_Bs;
+    Cu25519Mon OPK_Bp;
+    randombytes_buf(OPK_Bs.b, 32);
+    cu25519_generate(&OPK_Bs, &OPK_Bp);
+
+    show_block(std::cout, "bob OPK_Bp public key", OPK_Bp.b, 32);
+
+
+    format(std::cout, "bundle keys: \n");
+    prekey_bundle bobs_bundle;
+    bobs_bundle.ik_p = IK_Bp;
+    bobs_bundle.spk_p = SPK_Bp;
+    memcpy(bobs_bundle.spk_p_sig, SPK_Bp_sig, 64);
+    bobs_bundle.opk_p = OPK_Bp;
+
+    show_block(std::cout, "bob ik_p public key", bobs_bundle.ik_p.b, 32);
+    show_block(std::cout, "bob spk_p public key", bobs_bundle.spk_p.b, 32);
+    show_block(std::cout, "bob spk_p SPK_Bp_sig public key", bobs_bundle.spk_p_sig, 64);
+    show_block(std::cout, "bob opk_p public key", bobs_bundle.opk_p.b, 32);
 
 
     /*
-     ** Alice verifies the prekey sig and abort if verification fails
+     ** Alice verifies the prekey SPK_Bp_sig and abort if verification fails
      *  verify Bob’s prekey signature Sig(IK_B, Encode(SPK_B))
      *
      ** Alice calculates the shared key
@@ -225,6 +267,10 @@ void x3dh() {
      * An initial ciphertext encrypted with some AEAD encryption scheme using AD as associated data and using an encryption key SK
      *
      */
+
+
+
+
 
     /*
      ** Bob receives the initial message
