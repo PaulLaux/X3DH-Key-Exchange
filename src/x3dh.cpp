@@ -176,6 +176,7 @@ typedef struct {
 
 
 void x3dh() {
+    std::cout << "\nX3DH start\n";
     /*
      ** Bob publish keys:
      * Bob’s identity key IK_B
@@ -203,22 +204,21 @@ void x3dh() {
     cu25519_generate(&IK_Bs, &IK_Bp);
 
     // Human readable encoding of the public key.
-//    std::string enc;
-//    encode_key(IK_Bp.b, 32, enc, true);
-//    format(std::cout, _("bob IK_B public key:    %s\n"), enc);
+    //    std::string enc;
+    //    encode_key(IK_Bp.b, 32, enc, true);
+    //    format(std::cout, _("bob IK_B public key:    %s\n"), enc);
     show_block(std::cout, "bob IK_B public key", IK_Bp.b, 32);
 
     Cu25519Sec SPK_Bs;
     Cu25519Mon SPK_Bp;
     randombytes_buf(SPK_Bs.b, 32);
     cu25519_generate(&SPK_Bs, &SPK_Bp);
-
     show_block(std::cout, "bob SPK_B public key", SPK_Bp.b, 32);
 
     // sign and verify SPK_Bp_sig on SPK_Bp
     uint8_t SPK_Bp_sig[64];
-    curvesig("x3dh SPK_Bp_sig", SPK_Bp.b, 32, IK_Bp.b, IK_Bs.b, SPK_Bp_sig);
-    int errc = curverify("x3dh SPK_Bp_sig", SPK_Bp.b, 32, SPK_Bp_sig, IK_Bp.b);
+    curvesig("X3DH SPK_Bp_sig", SPK_Bp.b, 32, IK_Bp.b, IK_Bs.b, SPK_Bp_sig);
+    int errc = curverify("X3DH SPK_Bp_sig", SPK_Bp.b, 32, SPK_Bp_sig, IK_Bp.b);
     format(std::cout, "curverify returns %d\n", errc);
     show_block(std::cout, "bob SPK_Bp_sig public key", SPK_Bp_sig, 64);
 
@@ -245,7 +245,7 @@ void x3dh() {
 
     /*
      ** Alice verifies the prekey SPK_Bp_sig and abort if verification fails
-     *  verify Bob’s prekey signature Sig(IK_B, Encode(SPK_B))
+     *  Alice then generates an ephemeral key pair with public key EK_A.
      *
      ** Alice calculates the shared key
      *  DH1 = DH(IK_A, SPK_B)
@@ -267,10 +267,58 @@ void x3dh() {
      * An initial ciphertext encrypted with some AEAD encryption scheme using AD as associated data and using an encryption key SK
      *
      */
+    // Bob's identity key secret IK_B:
+    std::cout << "\nAlice start\n";
+    const char ika_sec[] = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
+
+    Cu25519Sec IK_As;
+    Cu25519Mon IK_Ap;
+
+    // load key into IK_As
+    read_block(ika_sec, &last, tmp);
+    if (*last || tmp.size() != 32) {
+        std::cout << "error reading key\n";
+        return;
+    }
+    memcpy(IK_As.b, &tmp[0], 32);
+    cu25519_generate(&IK_As, &IK_Ap);
+    show_block(std::cout, "alice IK_A public key", IK_Ap.b, 32);
+
+    // Alice verifies the prekey SPK_Bp_sig and abort if verification fails
+    errc = curverify("X3DH SPK_Bp_sig", bobs_bundle.spk_p.b, 32, bobs_bundle.spk_p_sig, bobs_bundle.ik_p.b);
+    if (errc) {
+        format(std::cout, "signature check fails, Alice aborts\n");
+        exit(1);
+    }
+    format(std::cout, "signature check successful\n");
+
+    // Alice then generates an ephemeral key pair with public key EK_A.
+    Cu25519Sec EK_As;
+    Cu25519Mon EK_Ap;
+    randombytes_buf(EK_As.b, 32);
+    cu25519_generate(&EK_As, &EK_Ap);
+    show_block(std::cout, "Alice ephemeral key EK_A public", EK_Ap.b, 32);
 
 
+    /*
+     * ** Alice calculates the shared key
+     *  DH1 = DH(IK_A, SPK_B)
+     *  DH2 = DH(EK_A, IK_B)
+     *  DH3 = DH(EK_A, SPK_B)
+     *  DH4 = DH(EK_A, OPK_B)
+     *  SK = KDF(DH1 || DH2 || DH3 || DH4)
+     */
+    uint8_t dh1[32], dh2[32], dh3[32], dh4[32];
+    cu25519_shared_secret(dh1, bobs_bundle.spk_p, IK_As);
+    //cu25519_shared_secret(dh1, bobs_bundle.ik_p, EK_As);
+//    cu25519_shared_secret(dh2, bobs_bundle.ik_p, EK_As);
+//    cu25519_shared_secret(dh3, bobs_bundle.spk_p, EK_As);
+//    cu25519_shared_secret(dh4, bobs_bundle.opk_p, EK_As);
 
+    cu25519_shared_secret(dh2, IK_Ap, SPK_Bs);
 
+    show_block(std::cout, "dh1", dh1, 32);
+    show_block(std::cout, "dh2", dh2, 32);
 
     /*
      ** Bob receives the initial message
