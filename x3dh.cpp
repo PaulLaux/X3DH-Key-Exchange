@@ -34,16 +34,6 @@
 
 using namespace amber;
 
-int crypto_equal(const unsigned char *mac1, const unsigned char *mac2, size_t n)
-{
-    size_t i;
-    unsigned int dif = 0;
-    for (i = 0; i < n; i++)
-        dif |= (mac1[i] ^ mac2[i]);
-    dif = (dif - 1) >> ((sizeof(unsigned int) * 8) - 1);
-    return (dif & 1);
-}
-
 typedef struct {
     Cu25519Mon ik_p;            // Bob's identity key
     Cu25519Mon spk_p;           // Bob's signed pre-key
@@ -58,12 +48,59 @@ typedef struct {
     Cu25519Mon spk_p;     // Bob's signed pre-key
     Cu25519Mon opk_p;     // Bob's one time pre-key
 
-    uint8_t ad_ct[64+16]; //An initial ciphertext encrypted using SK
+    uint8_t ad_ct[80]; //An initial ciphertext encrypted using SK
 
 } InitialMessage;
 
+class Server {
+public:
+
+    // handle keys bundle
+    void SetBundle(PrekeyBundle *bundle) {
+        this->bundle = bundle;
+    }
+
+    PrekeyBundle* GetBundle() {
+        if (!this->bundle){
+            throw std::logic_error (_("Unable to get bundle"));
+        }
+        return bundle;
+    }
+
+    // handle message delivery
+    void SendInitialMessage(InitialMessage *message){
+        this->message = message;
+    }
+    InitialMessage* GetInitialMessage(){
+        if (!this->message) {
+            throw std::logic_error (_("Unable to get message"));
+        }
+        return message;
+    }
+
+private:
+    PrekeyBundle* bundle;
+    InitialMessage* message;
+};
+
+// Check equality of the given vectors
+int c_equal(const unsigned char *mac1, const unsigned char *mac2, size_t n)
+{
+    size_t i;
+    unsigned int dif = 0;
+    for (i = 0; i < n; i++)
+        dif |= (mac1[i] ^ mac2[i]);
+    dif = (dif - 1) >> ((sizeof(unsigned int) * 8) - 1);
+    return (dif & 1);
+}
+
+
+
 void x3dh_key_exchange() {
     std::cout << "\nX3DH start, only public keys will be printed to screen.\n";
+
+    Server server;
+
     std::cout << "\nBob prepares the prekey bundle:\n";
     /*
      ** Bob publish keys:
@@ -92,9 +129,6 @@ void x3dh_key_exchange() {
     cu25519_generate(&IK_Bs, &IK_Bp);
 
     // Human readable encoding of the public key.
-    //    std::string enc;
-    //    encode_key(IK_Bp.b, 32, enc, true);
-    //    format(std::cout, _("bob IK_B public key:    %s\n"), enc);
     show_block(std::cout, "bob IK_B public key", IK_Bp.b, 32);
 
     Cu25519Sec SPK_Bs;
@@ -124,6 +158,9 @@ void x3dh_key_exchange() {
     bobs_bundle.opk_p = OPK_Bp;
 
 
+    // Bob sends the bundle to the server
+    server.SetBundle(&bobs_bundle);
+
     /*
      ** Alice verifies the prekey SPK_Bp_sig and abort if verification fails
      *  Alice then generates an ephemeral key pair with public key EK_A.
@@ -148,8 +185,8 @@ void x3dh_key_exchange() {
      * An initial ciphertext encrypted with some AEAD encryption scheme using AD as associated data and using an encryption key SK
      *
      */
-    // Bob's identity key secret IK_B:
-    std::cout << "\nAlice start:\n";
+
+    std::cout << "\nAlice got Bob's bundle:\n";
     const char ika_sec[] = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
 
     Cu25519Sec IK_As;
@@ -165,8 +202,12 @@ void x3dh_key_exchange() {
     cu25519_generate(&IK_As, &IK_Ap);
     show_block(std::cout, "alice IK_A public key", IK_Ap.b, 32);
 
+
+    // Alice receives Bob's bundle
+    PrekeyBundle *b_bundle = server.GetBundle();
+
     // Alice verifies the prekey SPK_Bp_sig and abort if verification fails
-    int errc = curverify("X3DH SPK_Bp_sig", bobs_bundle.spk_p.b, 32, bobs_bundle.spk_p_sig, bobs_bundle.ik_p.b);
+    int errc = curverify("X3DH SPK_Bp_sig", b_bundle->spk_p.b, 32, b_bundle->spk_p_sig, b_bundle->ik_p.b);
     if (errc) {
         format(std::cout, "signature check fails, Alice aborts\n");
         exit(1);
@@ -190,10 +231,10 @@ void x3dh_key_exchange() {
      *  SK = KDF(DH1 || DH2 || DH3 || DH4)
      */
     uint8_t dh1_a[32], dh2_a[32], dh3_a[32], dh4_a[32];
-    cu25519_shared_secret(dh1_a, bobs_bundle.spk_p, IK_As);
-    cu25519_shared_secret(dh2_a, bobs_bundle.ik_p, EK_As);
-    cu25519_shared_secret(dh3_a, bobs_bundle.spk_p, EK_As);
-    cu25519_shared_secret(dh4_a, bobs_bundle.opk_p, EK_As);
+    cu25519_shared_secret(dh1_a, b_bundle->spk_p, IK_As);
+    cu25519_shared_secret(dh2_a, b_bundle->ik_p, EK_As);
+    cu25519_shared_secret(dh3_a, b_bundle->spk_p, EK_As);
+    cu25519_shared_secret(dh4_a, b_bundle->opk_p, EK_As);
 
     uint8_t dh_concat_a[128];
 
@@ -218,8 +259,8 @@ void x3dh_key_exchange() {
     // AD = IK_A || AK_B
     uint8_t AD[64];
     memcpy(AD, IK_Ap.b, 32);
-    memcpy(AD + 32, bobs_bundle.ik_p.b, 32);
-    show_block(std::cout, "*****Bob's identity key, as seen by Alice*****", bobs_bundle.ik_p.b, 32);
+    memcpy(AD + 32, b_bundle->ik_p.b, 32);
+    show_block(std::cout, "*****Bob's identity key, as seen by Alice*****", b_bundle->ik_p.b, 32);
 
     // An initial ciphertext encrypted with some AEAD encryption scheme using AD as associated data and using an encryption key SK
     const uint ct_size = sizeof AD + 16;
@@ -240,9 +281,11 @@ void x3dh_key_exchange() {
     InitialMessage alices_msg;
     alices_msg.ik_p = IK_Ap;
     alices_msg.ek_p = EK_Ap;
-    alices_msg.spk_p = bobs_bundle.spk_p;
-    alices_msg.opk_p = bobs_bundle.opk_p;
+    alices_msg.spk_p = b_bundle->spk_p;
+    alices_msg.opk_p = b_bundle->opk_p;
     memcpy(alices_msg.ad_ct, cipher_text, ct_size);
+
+
 
     /*
      ** Bob receives the initial message
@@ -297,7 +340,7 @@ void x3dh_key_exchange() {
     show_block(std::cout, "Bob successfully decrypted AD", AD_b, sizeof AD_b);
 
 
-    if (crypto_equal(AD_b, AD_dec,64)){
+    if (c_equal(AD_b, AD_dec, 64)){
         std::cout << "\nSuccess! Secret key established\n";
         std::cout << "Parties should compare identity keys via an off-band channel to complete verification!\n";
     } else {

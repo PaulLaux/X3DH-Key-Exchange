@@ -42,23 +42,7 @@ lib%.a:
 	g++ $(CCFLAGS) -o$@ $^ $(LIBS)
 
 
-all: $(BIN)/amber $(BIN)/libamber$(SOV) $(BIN)/genpass $(BIN)/wipe $(BIN)/blakerng $(BIN)/tweetcmd x3dh
-
-PREFIX=/usr/local
-INSTALLBIN=$(PREFIX)/bin
-INSTALLLIB=$(PREFIX)/lib
-INSTALLINCLUDE=$(PREFIX)/include
-
-install: all
-	install $(BIN)/amber $(BIN)/genpass $(BIN)/wipe $(BIN)/blakerng $(BIN)/tweetcmd $(INSTALLBIN)
-	install $(BIN)/libamber$(SOV) $(INSTALLLIB)
-	-rm $(INSTALLLIB)/libamber.$(SO)
-	ln $(INSTALLLIB)/libamber$(SOV) $(INSTALLLIB)/libamber.$(SO)
-	install -d $(INSTALLINCLUDE)/amber
-	install $(FULL_LIB_HEADERS) $(INSTALLINCLUDE)/amber
-	$(CPL2B)
-
-
+all: x3dh
 
 
 
@@ -323,7 +307,7 @@ bin/group25519_test: \
     bin/hasopt.o bin/misc.o bin/symmetric.o bin/group25519.o  \
     bin/blake2.o
 
-x3dh_key_exchange: \
+x3dh: \
     bin/sha2.o bin/poly1305.o bin/field25519.o  \
     bin/hasopt.o bin/misc.o bin/group25519.o  \
     bin/blake2.o bin/keys.o bin/protobuf.o bin/blockbuf.o \
