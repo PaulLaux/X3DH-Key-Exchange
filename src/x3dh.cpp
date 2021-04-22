@@ -168,6 +168,16 @@ void blake_test(const char *p1, size_t n1, const char *p2, size_t n2, const char
     show_block(std::cout, "hash    ", h1, 64);
 }
 
+int crypto_equal(const unsigned char *mac1, const unsigned char *mac2, size_t n)
+{
+    size_t i;
+    unsigned int dif = 0;
+    for (i = 0; i < n; i++)
+        dif |= (mac1[i] ^ mac2[i]);
+    dif = (dif - 1) >> ((sizeof(unsigned int) * 8) - 1);
+    return (dif & 1);
+}
+
 typedef struct {
     Cu25519Mon ik_p;            // Bob's identity key
     Cu25519Mon spk_p;           // Bob's signed pre-key
@@ -187,7 +197,8 @@ typedef struct {
 } InitialMessage;
 
 void x3dh() {
-    std::cout << "\nX3DH start\n";
+    std::cout << "\nX3DH start, only public keys will be printed to screen.\n";
+    std::cout << "\nBob prepares the prekey bundle:\n";
     /*
      ** Bob publish keys:
      * Bob’s identity key IK_B
@@ -229,9 +240,7 @@ void x3dh() {
     // sign and verify SPK_Bp_sig on SPK_Bp
     uint8_t SPK_Bp_sig[64];
     curvesig("X3DH SPK_Bp_sig", SPK_Bp.b, 32, IK_Bp.b, IK_Bs.b, SPK_Bp_sig);
-    int errc = curverify("X3DH SPK_Bp_sig", SPK_Bp.b, 32, SPK_Bp_sig, IK_Bp.b);
-    format(std::cout, "curverify returns %d\n", errc);
-    show_block(std::cout, "bob SPK_Bp_sig public key", SPK_Bp_sig, 64);
+    show_block(std::cout, "bob SPK_Bp_sig", SPK_Bp_sig, 64);
 
     Cu25519Sec OPK_Bs;
     Cu25519Mon OPK_Bp;
@@ -241,17 +250,12 @@ void x3dh() {
     show_block(std::cout, "bob OPK_Bp public key", OPK_Bp.b, 32);
 
 
-    format(std::cout, "bundle keys: \n");
+    // create bundle message
     PrekeyBundle bobs_bundle;
     bobs_bundle.ik_p = IK_Bp;
     bobs_bundle.spk_p = SPK_Bp;
     memcpy(bobs_bundle.spk_p_sig, SPK_Bp_sig, 64);
     bobs_bundle.opk_p = OPK_Bp;
-
-    show_block(std::cout, "bob ik_p public key", bobs_bundle.ik_p.b, 32);
-    show_block(std::cout, "bob spk_p public key", bobs_bundle.spk_p.b, 32);
-    show_block(std::cout, "bob spk_p SPK_Bp_sig public key", bobs_bundle.spk_p_sig, 64);
-    show_block(std::cout, "bob opk_p public key", bobs_bundle.opk_p.b, 32);
 
 
     /*
@@ -279,7 +283,7 @@ void x3dh() {
      *
      */
     // Bob's identity key secret IK_B:
-    std::cout << "\nAlice start\n";
+    std::cout << "\nAlice start:\n";
     const char ika_sec[] = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
 
     Cu25519Sec IK_As;
@@ -296,12 +300,12 @@ void x3dh() {
     show_block(std::cout, "alice IK_A public key", IK_Ap.b, 32);
 
     // Alice verifies the prekey SPK_Bp_sig and abort if verification fails
-    errc = curverify("X3DH SPK_Bp_sig", bobs_bundle.spk_p.b, 32, bobs_bundle.spk_p_sig, bobs_bundle.ik_p.b);
+    int errc = curverify("X3DH SPK_Bp_sig", bobs_bundle.spk_p.b, 32, bobs_bundle.spk_p_sig, bobs_bundle.ik_p.b);
     if (errc) {
         format(std::cout, "signature check fails, Alice aborts\n");
         exit(1);
     }
-    format(std::cout, "signature check successful\n");
+    format(std::cout, "SPK_Bp signature verifies successfully\n");
 
     // Alice then generates an ephemeral key pair with public key EK_A.
     Cu25519Sec EK_As;
@@ -335,7 +339,6 @@ void x3dh() {
     uint8_t SK[32];
     const char *domain ="KDF DOMAIN";
     scrypt_blake2b (SK, sizeof SK, domain, 32, dh_concat_a, sizeof dh_concat_a, 10);
-    show_block(std::cout, "SK alice", SK, 32);
 
 
     // Alice deletes her ephemeral private key and the DH outputs
@@ -350,7 +353,7 @@ void x3dh() {
     uint8_t AD[64];
     memcpy(AD, IK_Ap.b, 32);
     memcpy(AD + 32, bobs_bundle.ik_p.b, 32);
-    show_block(std::cout, "AD", AD, 64);
+    show_block(std::cout, "*****Bob's identity key, as seen by Alice*****", bobs_bundle.ik_p.b, 32);
 
     // An initial ciphertext encrypted with some AEAD encryption scheme using AD as associated data and using an encryption key SK
     const uint ct_size = sizeof AD + 16;
@@ -391,6 +394,10 @@ void x3dh() {
      * Bob and Alice should compare fingerprints via an off-band channel
      */
 
+    std::cout << "\nBob got Alice initial message:\n";
+
+    show_block(std::cout, "*****Alice's identity key, as seen by Bob*****", alices_msg.ik_p.b, 32);
+
     uint8_t dh1_b[32], dh2_b[32], dh3_b[32], dh4_b[32];
     cu25519_shared_secret(dh1_b, alices_msg.ik_p, SPK_Bs);
     cu25519_shared_secret(dh2_b, alices_msg.ek_p, IK_Bs);
@@ -418,20 +425,19 @@ void x3dh() {
         exit(1);
     }
 
-    show_block(std::cout, "pt", AD_dec, 64);
+    uint8_t AD_b[64];
+    memcpy(AD_b, alices_msg.ik_p.b, 32);
+    memcpy(AD_b + 32, bobs_bundle.ik_p.b, 32);
+    show_block(std::cout, "Bob successfully decrypted AD", AD_b, sizeof AD_b);
 
-//    show_block(std::cout, "dh1_a", dh1_a, 32);
-//    show_block(std::cout, "dh1_b", dh1_b, 32);
-//
-//    show_block(std::cout, "dh2_a", dh2_a, 32);
-//    show_block(std::cout, "dh2_b", dh2_b, 32);
-//
-//    show_block(std::cout, "dh3_a", dh3_a, 32);
-//    show_block(std::cout, "dh3_b", dh3_b, 32);
-//
-//    show_block(std::cout, "dh4_a", dh4_a, 32);
-//    show_block(std::cout, "dh4_b", dh4_b, 32);
 
+    if (crypto_equal(AD_b, AD_dec,64)){
+        std::cout << "\nSuccess! Secret key established\n";
+        std::cout << "Parties should compare identity keys via an off-band channel to complete verification!\n";
+    } else {
+        std::cout << "Failure! mismatched AD message, Bob abort\n";
+        exit(1);
+    }
 
 }
 
