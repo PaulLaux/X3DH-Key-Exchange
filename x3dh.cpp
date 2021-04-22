@@ -52,6 +52,8 @@ typedef struct {
 
 } InitialMessage;
 
+const char *domain ="KDF DOMAIN";
+
 class Server {
 public:
 
@@ -244,7 +246,7 @@ void x3dh_key_exchange() {
     memcpy(dh_concat_a + 96, dh4_a, 32);
 
     uint8_t SK[32];
-    const char *domain ="KDF DOMAIN";
+
     scrypt_blake2b (SK, sizeof SK, domain, 32, dh_concat_a, sizeof dh_concat_a, 10);
 
 
