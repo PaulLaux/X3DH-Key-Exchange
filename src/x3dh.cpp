@@ -29,6 +29,7 @@
 #include "misc.hpp"
 #include "hasopt.hpp"
 #include "keys.hpp"
+
 #include <iostream>
 #include <string.h>
 #include <fstream>
@@ -335,10 +336,31 @@ void x3dh() {
     randombytes_buf(dh4_a, 32);
 
     // Alice calculates the associated data AD that contains identity information for both parties
+    // AD = IK_A || AK_B
     uint8_t AD[64];
     memcpy(AD, IK_Ap.b, 32);
     memcpy(AD + 32, bobs_bundle.ik_p.b, 32);
     show_block(std::cout, "AD", AD, 64);
+
+//    void encrypt_with_ad (const uint8_t *ad, size_t alen,
+//                          const uint8_t *pt, size_t plen,
+//                          uint8_t *ct /*ct[plen+16]*/) {
+    uint8_t ct[64+16];
+    Chakey key;
+    load (&key, SK);
+    uint64_t nonce64;
+//  randombytes_buf(&nonce64, 64);
+    encrypt_one (ct, AD, 64, NULL, 0, key, nonce64);
+
+    show_block(std::cout, "cypher", ct, 64+16);
+
+    uint8_t AD_dec[64];
+    errc = decrypt_one(AD_dec, ct, 64+16, NULL, 0, key, nonce64);
+    if (errc) {
+        std::cout << "decryption error";
+    }
+
+    show_block(std::cout, "pt", AD_dec, 64);
 
     /*
      ** Bob receives the initial message
@@ -371,7 +393,7 @@ void x3dh() {
 
     uint8_t SK2[32];
     scrypt_blake2b (SK2, sizeof SK2, domain, 32, dh_concat_b, 128, 10);
-    show_block(std::cout, "SK bob", SK2, 32);
+//    show_block(std::cout, "SK bob", SK2, 32);
 
 //    show_block(std::cout, "dh1_a", dh1_a, 32);
 //    show_block(std::cout, "dh1_b", dh1_b, 32);
@@ -389,13 +411,13 @@ void x3dh() {
 }
 
 int main() {
-    test_curvesig();
-    test_x25519();
-
-    const char s1[] = "foo";
-    const char s2[] = "bar";
-    const char s3[] = "foobar";
-    blake_test(s1, sizeof s1, s2, sizeof s2, s3, sizeof s3);
+//    test_curvesig();
+//    test_x25519();
+//
+//    const char s1[] = "foo";
+//    const char s2[] = "bar";
+//    const char s3[] = "foobar";
+//    blake_test(s1, sizeof s1, s2, sizeof s2, s3, sizeof s3);
 
     x3dh();
 }
