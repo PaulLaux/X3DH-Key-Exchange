@@ -38,8 +38,11 @@ lib%$(SOEXT):
 lib%.a:
 	ar -cru -o $@ $^
 
+%: $(BIN)/%.o
+	g++ $(CCFLAGS) -o$@ $^ $(LIBS)
 
-all: $(BIN)/amber $(BIN)/libamber$(SOV) $(BIN)/genpass $(BIN)/wipe $(BIN)/blakerng $(BIN)/tweetcmd $(BIN)/x3dh
+
+all: $(BIN)/amber $(BIN)/libamber$(SOV) $(BIN)/genpass $(BIN)/wipe $(BIN)/blakerng $(BIN)/tweetcmd x3dh
 
 PREFIX=/usr/local
 INSTALLBIN=$(PREFIX)/bin
@@ -320,7 +323,7 @@ bin/group25519_test: \
     bin/hasopt.o bin/misc.o bin/symmetric.o bin/group25519.o  \
     bin/blake2.o
 
-bin/x3dh: \
+x3dh_key_exchange: \
     bin/sha2.o bin/poly1305.o bin/field25519.o  \
     bin/hasopt.o bin/misc.o bin/group25519.o  \
     bin/blake2.o bin/keys.o bin/protobuf.o bin/blockbuf.o \
