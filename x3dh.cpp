@@ -285,6 +285,7 @@ void x3dh_key_exchange() {
     alices_msg.opk_p = b_bundle->opk_p;
     memcpy(alices_msg.ad_ct, cipher_text, ct_size);
 
+    server.SendInitialMessage(&alices_msg);
 
 
     /*
@@ -303,15 +304,17 @@ void x3dh_key_exchange() {
      * Bob and Alice should compare fingerprints via an off-band channel
      */
 
-    std::cout << "\nBob got Alice initial message:\n";
+    InitialMessage *a_msg = server.GetInitialMessage();
 
-    show_block(std::cout, "*****Alice's identity key, as seen by Bob*****", alices_msg.ik_p.b, 32);
+    std::cout << "\nBob got Alice's initial message:\n";
+
+    show_block(std::cout, "*****Alice's identity key, as seen by Bob*****", a_msg->ik_p.b, 32);
 
     uint8_t dh1_b[32], dh2_b[32], dh3_b[32], dh4_b[32];
-    cu25519_shared_secret(dh1_b, alices_msg.ik_p, SPK_Bs);
-    cu25519_shared_secret(dh2_b, alices_msg.ek_p, IK_Bs);
-    cu25519_shared_secret(dh3_b, alices_msg.ek_p, SPK_Bs);
-    cu25519_shared_secret(dh4_b, alices_msg.ek_p, OPK_Bs);
+    cu25519_shared_secret(dh1_b, a_msg->ik_p, SPK_Bs);
+    cu25519_shared_secret(dh2_b, a_msg->ek_p, IK_Bs);
+    cu25519_shared_secret(dh3_b, a_msg->ek_p, SPK_Bs);
+    cu25519_shared_secret(dh4_b, a_msg->ek_p, OPK_Bs);
 
     uint8_t dh_concat_b[128];
 
@@ -323,24 +326,24 @@ void x3dh_key_exchange() {
     uint8_t SK2[32];
     scrypt_blake2b (SK2, sizeof SK2, domain, 32, dh_concat_b, sizeof dh_concat_b, 10);
 
-//    show_block(std::cout, "SK bob", SK2, 32);
+
     Chakey key2;
     load (&key2, SK2);
 
-    uint8_t AD_dec[64];
-    errc = decrypt_one(AD_dec, cipher_text, ct_size, NULL, 0, key2, nonce64);
+    uint8_t ad_dec[64];
+    errc = decrypt_one(ad_dec, cipher_text, ct_size, NULL, 0, key2, nonce64);
     if (errc) {
-        std::cout << "decryption error, bob abort";
+        std::cout << "decryption error, Bob abort";
         exit(1);
     }
 
-    uint8_t AD_b[64];
-    memcpy(AD_b, alices_msg.ik_p.b, 32);
-    memcpy(AD_b + 32, bobs_bundle.ik_p.b, 32);
-    show_block(std::cout, "Bob successfully decrypted AD", AD_b, sizeof AD_b);
+    uint8_t ad_b[64];
+    memcpy(ad_b, a_msg->ik_p.b, 32);
+    memcpy(ad_b + 32, bobs_bundle.ik_p.b, 32);
+    show_block(std::cout, "Bob successfully decrypted AD", ad_b, sizeof ad_b);
 
 
-    if (c_equal(AD_b, AD_dec, 64)){
+    if (c_equal(ad_b, ad_dec, 64)){
         std::cout << "\nSuccess! Secret key established\n";
         std::cout << "Parties should compare identity keys via an off-band channel to complete verification!\n";
     } else {
