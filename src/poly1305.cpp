@@ -1,5 +1,5 @@
 /*
-	Public domain by Andrew M. <liquidsun@gmail.com>
+	Public Domain by Andrew M. <liquidsun@gmail.com>
 
 	Poly1305-donna.
 */

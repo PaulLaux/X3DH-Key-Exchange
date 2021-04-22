@@ -1,30 +1,3 @@
-/*
- * Copyright (c) 2015-2018, Pelayo Bernedo
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
- * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
- * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 #include "src/group25519.hpp"
 #include "src/misc.hpp"
 #include "src/hasopt.hpp"
@@ -52,7 +25,7 @@ typedef struct {
 
 } InitialMessage;
 
-const char *domain ="KDF DOMAIN";
+const char *Domain ="X3DH DOMAIN";
 
 class Server {
 public:
@@ -79,6 +52,28 @@ public:
         }
         return message;
     }
+
+private:
+    PrekeyBundle* bundle;
+    InitialMessage* message;
+};
+
+class Bob {
+public:
+
+    // init bob using his private key
+    explicit Bob(const char ikb_sec[]){
+
+    }
+
+    // display public key
+    void PrintFingerprint();
+
+    // generate keys bundle to be uploaded to the server (and store relevant data)
+    PrekeyBundle* GenerateBundle();
+
+    // handle initial message from alice
+    void HandleInitialMessage(InitialMessage* message);
 
 private:
     PrekeyBundle* bundle;
@@ -247,7 +242,7 @@ void x3dh_key_exchange() {
 
     uint8_t SK[32];
 
-    scrypt_blake2b (SK, sizeof SK, domain, 32, dh_concat_a, sizeof dh_concat_a, 10);
+    scrypt_blake2b (SK, sizeof SK, Domain, 32, dh_concat_a, sizeof dh_concat_a, 10);
 
 
     // Alice deletes her ephemeral private key and the DH outputs
@@ -326,7 +321,7 @@ void x3dh_key_exchange() {
     memcpy(dh_concat_b + 96, dh4_b, 32);
 
     uint8_t SK2[32];
-    scrypt_blake2b (SK2, sizeof SK2, domain, 32, dh_concat_b, sizeof dh_concat_b, 10);
+    scrypt_blake2b (SK2, sizeof SK2, Domain, 32, dh_concat_b, sizeof dh_concat_b, 10);
 
 
     Chakey key2;

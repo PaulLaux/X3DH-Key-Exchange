@@ -236,7 +236,7 @@ or bugs in this library or program.
 License
 -------
 
-The parts taken from other persons use public domain, MIT, or BSD licenses.
+The parts taken from other persons use public Domain, MIT, or BSD licenses.
 
 The parts written by Pelayo Bernedo are licensed according to the two clause
 BSD license.
