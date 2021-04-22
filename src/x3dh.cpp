@@ -169,12 +169,22 @@ void blake_test(const char *p1, size_t n1, const char *p2, size_t n2, const char
 }
 
 typedef struct {
-    Cu25519Mon ik_p;            // bob's identity key
-    Cu25519Mon spk_p;           // bob's signed pre-key
-    uint8_t    spk_p_sig[64];   // bob's signature on spk_bp using IK
-    Cu25519Mon opk_p;           // bob's one time pre-key
-} prekey_bundle;
+    Cu25519Mon ik_p;            // Bob's identity key
+    Cu25519Mon spk_p;           // Bob's signed pre-key
+    uint8_t    spk_p_sig[64];   // Bob's signature on spk_bp using IK
+    Cu25519Mon opk_p;           // Bob's one time pre-key
+} PrekeyBundle;
 
+typedef struct {
+    Cu25519Mon ik_p;      // Alice’s identity key
+    Cu25519Mon ek_p;      // Alice’s ephemeral key
+
+    Cu25519Mon spk_p;     // Bob's signed pre-key
+    Cu25519Mon opk_p;     // Bob's one time pre-key
+
+    uint8_t ad_ct[64+16]; //An initial ciphertext encrypted using SK
+
+} InitialMessage;
 
 void x3dh() {
     std::cout << "\nX3DH start\n";
@@ -232,7 +242,7 @@ void x3dh() {
 
 
     format(std::cout, "bundle keys: \n");
-    prekey_bundle bobs_bundle;
+    PrekeyBundle bobs_bundle;
     bobs_bundle.ik_p = IK_Bp;
     bobs_bundle.spk_p = SPK_Bp;
     memcpy(bobs_bundle.spk_p_sig, SPK_Bp_sig, 64);
@@ -324,7 +334,7 @@ void x3dh() {
 
     uint8_t SK[32];
     const char *domain ="KDF DOMAIN";
-    scrypt_blake2b (SK, sizeof SK, domain, 32, dh_concat_a, 128, 10);
+    scrypt_blake2b (SK, sizeof SK, domain, 32, dh_concat_a, sizeof dh_concat_a, 10);
     show_block(std::cout, "SK alice", SK, 32);
 
 
@@ -342,25 +352,28 @@ void x3dh() {
     memcpy(AD + 32, bobs_bundle.ik_p.b, 32);
     show_block(std::cout, "AD", AD, 64);
 
-//    void encrypt_with_ad (const uint8_t *ad, size_t alen,
-//                          const uint8_t *pt, size_t plen,
-//                          uint8_t *ct /*ct[plen+16]*/) {
-    uint8_t ct[64+16];
+    // An initial ciphertext encrypted with some AEAD encryption scheme using AD as associated data and using an encryption key SK
+    const uint ct_size = sizeof AD + 16;
+    uint8_t cipher_text[ct_size];
     Chakey key;
     load (&key, SK);
     uint64_t nonce64;
-//  randombytes_buf(&nonce64, 64);
-    encrypt_one (ct, AD, 64, NULL, 0, key, nonce64);
+    randombytes_buf(&nonce64, 4);
+    encrypt_one (cipher_text, AD, sizeof AD, NULL, 0, key, nonce64);
 
-    show_block(std::cout, "cypher", ct, 64+16);
-
-    uint8_t AD_dec[64];
-    errc = decrypt_one(AD_dec, ct, 64+16, NULL, 0, key, nonce64);
-    if (errc) {
-        std::cout << "decryption error";
-    }
-
-    show_block(std::cout, "pt", AD_dec, 64);
+    /*
+     * ** Alice then sends Bob an initial message containing:
+     * Alice’s identity key IK_A
+     * Alice’s ephemeral key EK_A
+     * Identifiers stating which of Bob’s prekeys Alice used
+     * An initial ciphertext encrypted with SK
+     */
+    InitialMessage alices_msg;
+    alices_msg.ik_p = IK_Ap;
+    alices_msg.ek_p = EK_Ap;
+    alices_msg.spk_p = bobs_bundle.spk_p;
+    alices_msg.opk_p = bobs_bundle.opk_p;
+    memcpy(alices_msg.ad_ct, cipher_text, ct_size);
 
     /*
      ** Bob receives the initial message
@@ -368,7 +381,7 @@ void x3dh() {
      * Bob also loads his identity private key, and the private key(s) corresponding to whichever signed prekey and one-time prekey (if any) Alice used.
      * Using these keys, Bob repeats the DH and KDF calculations from the previous section to derive SK, and then deletes the DH values.
      * Bob then constructs the AD byte sequence using IKA and IKB, as described in the previous section.
-     * Finally, Bob attempts to decrypt the initial cipher text using SK and AD.
+     * Finally, Bob attempts to decrypt the initial cipher_text text using SK and AD.
      * If the initial ciphertext fails to decrypt, then Bob aborts the protocol and deletes SK.
      * If the initial ciphertext decrypts successfully the protocol is complete for Bob.
      * Bob deletes any one-time prekey private key that was used, for forward secrecy.
@@ -379,10 +392,10 @@ void x3dh() {
      */
 
     uint8_t dh1_b[32], dh2_b[32], dh3_b[32], dh4_b[32];
-    cu25519_shared_secret(dh1_b, IK_Ap, SPK_Bs);
-    cu25519_shared_secret(dh2_b, EK_Ap, IK_Bs);
-    cu25519_shared_secret(dh3_b, EK_Ap, SPK_Bs);
-    cu25519_shared_secret(dh4_b, EK_Ap, OPK_Bs);
+    cu25519_shared_secret(dh1_b, alices_msg.ik_p, SPK_Bs);
+    cu25519_shared_secret(dh2_b, alices_msg.ek_p, IK_Bs);
+    cu25519_shared_secret(dh3_b, alices_msg.ek_p, SPK_Bs);
+    cu25519_shared_secret(dh4_b, alices_msg.ek_p, OPK_Bs);
 
     uint8_t dh_concat_b[128];
 
@@ -392,8 +405,20 @@ void x3dh() {
     memcpy(dh_concat_b + 96, dh4_b, 32);
 
     uint8_t SK2[32];
-    scrypt_blake2b (SK2, sizeof SK2, domain, 32, dh_concat_b, 128, 10);
+    scrypt_blake2b (SK2, sizeof SK2, domain, 32, dh_concat_b, sizeof dh_concat_b, 10);
+
 //    show_block(std::cout, "SK bob", SK2, 32);
+    Chakey key2;
+    load (&key2, SK2);
+
+    uint8_t AD_dec[64];
+    errc = decrypt_one(AD_dec, cipher_text, ct_size, NULL, 0, key2, nonce64);
+    if (errc) {
+        std::cout << "decryption error, bob abort";
+        exit(1);
+    }
+
+    show_block(std::cout, "pt", AD_dec, 64);
 
 //    show_block(std::cout, "dh1_a", dh1_a, 32);
 //    show_block(std::cout, "dh1_b", dh1_b, 32);
