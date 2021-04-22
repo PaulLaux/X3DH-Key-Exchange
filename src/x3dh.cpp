@@ -335,6 +335,11 @@ void x3dh() {
     randombytes_buf(dh4_a, 32);
 
     // Alice calculates the associated data AD that contains identity information for both parties
+    uint8_t AD[64];
+    memcpy(AD, IK_Ap.b, 32);
+    memcpy(AD + 32, bobs_bundle.ik_p.b, 32);
+    show_block(std::cout, "AD", AD, 64);
+
     /*
      ** Bob receives the initial message
      * Upon receiving Alice’s initial message, Bob retrieves Alice’s identity key and ephemeral key from the message.
