@@ -258,7 +258,7 @@ void x3dh() {
      ** Alice deletes her ephemeral private key and the DH outputs
      *
      ** Alice calculates the associated data AD that contains identity information for both parties
-     *  AD = Encode(IK_A) || Encode(IK_A)
+     *  AD = Encode(IK_A) || Encode(IK_B)
      *
      ** Alice then sends Bob an initial message containing:
      * Alice’s identity key IK_A
@@ -308,18 +308,33 @@ void x3dh() {
      *  DH4 = DH(EK_A, OPK_B)
      *  SK = KDF(DH1 || DH2 || DH3 || DH4)
      */
-    uint8_t dh1[32], dh2[32], dh3[32], dh4[32];
-    cu25519_shared_secret(dh1, bobs_bundle.spk_p, IK_As);
-    //cu25519_shared_secret(dh1, bobs_bundle.ik_p, EK_As);
-//    cu25519_shared_secret(dh2, bobs_bundle.ik_p, EK_As);
-//    cu25519_shared_secret(dh3, bobs_bundle.spk_p, EK_As);
-//    cu25519_shared_secret(dh4, bobs_bundle.opk_p, EK_As);
+    uint8_t dh1_a[32], dh2_a[32], dh3_a[32], dh4_a[32];
+    cu25519_shared_secret(dh1_a, bobs_bundle.spk_p, IK_As);
+    cu25519_shared_secret(dh2_a, bobs_bundle.ik_p, EK_As);
+    cu25519_shared_secret(dh3_a, bobs_bundle.spk_p, EK_As);
+    cu25519_shared_secret(dh4_a, bobs_bundle.opk_p, EK_As);
 
-    cu25519_shared_secret(dh2, IK_Ap, SPK_Bs);
+    uint8_t dh_concat_a[128];
 
-    show_block(std::cout, "dh1", dh1, 32);
-    show_block(std::cout, "dh2", dh2, 32);
+    memcpy(dh_concat_a, dh1_a, 32);
+    memcpy(dh_concat_a + 32, dh2_a, 32);
+    memcpy(dh_concat_a + 64, dh3_a, 32);
+    memcpy(dh_concat_a + 96, dh4_a, 32);
 
+    uint8_t SK[32];
+    const char *domain ="KDF DOMAIN";
+    scrypt_blake2b (SK, sizeof SK, domain, 32, dh_concat_a, 128, 10);
+    show_block(std::cout, "SK alice", SK, 32);
+
+
+    // Alice deletes her ephemeral private key and the DH outputs
+    randombytes_buf(EK_As.b, 32);
+    randombytes_buf(dh1_a, 32);
+    randombytes_buf(dh2_a, 32);
+    randombytes_buf(dh3_a, 32);
+    randombytes_buf(dh4_a, 32);
+
+    // Alice calculates the associated data AD that contains identity information for both parties
     /*
      ** Bob receives the initial message
      * Upon receiving Alice’s initial message, Bob retrieves Alice’s identity key and ephemeral key from the message.
@@ -333,8 +348,37 @@ void x3dh() {
      */
 
     /*
-     * Bob and Alice blake_test fingerprints via an off-band channel
+     * Bob and Alice should compare fingerprints via an off-band channel
      */
+
+    uint8_t dh1_b[32], dh2_b[32], dh3_b[32], dh4_b[32];
+    cu25519_shared_secret(dh1_b, IK_Ap, SPK_Bs);
+    cu25519_shared_secret(dh2_b, EK_Ap, IK_Bs);
+    cu25519_shared_secret(dh3_b, EK_Ap, SPK_Bs);
+    cu25519_shared_secret(dh4_b, EK_Ap, OPK_Bs);
+
+    uint8_t dh_concat_b[128];
+
+    memcpy(dh_concat_b, dh1_b, 32);
+    memcpy(dh_concat_b + 32, dh2_b, 32);
+    memcpy(dh_concat_b + 64, dh3_b, 32);
+    memcpy(dh_concat_b + 96, dh4_b, 32);
+
+    uint8_t SK2[32];
+    scrypt_blake2b (SK2, sizeof SK2, domain, 32, dh_concat_b, 128, 10);
+    show_block(std::cout, "SK bob", SK2, 32);
+
+//    show_block(std::cout, "dh1_a", dh1_a, 32);
+//    show_block(std::cout, "dh1_b", dh1_b, 32);
+//
+//    show_block(std::cout, "dh2_a", dh2_a, 32);
+//    show_block(std::cout, "dh2_b", dh2_b, 32);
+//
+//    show_block(std::cout, "dh3_a", dh3_a, 32);
+//    show_block(std::cout, "dh3_b", dh3_b, 32);
+//
+//    show_block(std::cout, "dh4_a", dh4_a, 32);
+//    show_block(std::cout, "dh4_b", dh4_b, 32);
 
 
 }
