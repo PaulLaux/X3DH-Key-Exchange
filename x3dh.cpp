@@ -230,17 +230,17 @@ public:
          *  DH3 = DH(EK_A, SPK_B)
          *  DH4 = DH(EK_A, OPK_B)
          */
-        uint8_t dh1_a[32], dh2_a[32], dh3_a[32], dh4_a[32];
-        cu25519_shared_secret(dh1_a, bundle->spk_p, IK_As);
-        cu25519_shared_secret(dh2_a, bundle->ik_p, EK_As);
-        cu25519_shared_secret(dh3_a, bundle->spk_p, EK_As);
-        cu25519_shared_secret(dh4_a, bundle->opk_p, EK_As);
+        uint8_t dh1[32], dh2[32], dh3[32], dh4[32];
+        cu25519_shared_secret(dh1, bundle->spk_p, IK_As);
+        cu25519_shared_secret(dh2, bundle->ik_p, EK_As);
+        cu25519_shared_secret(dh3, bundle->spk_p, EK_As);
+        cu25519_shared_secret(dh4, bundle->opk_p, EK_As);
 
-        uint8_t dh_concat[128];
-        memcpy(dh_concat, dh1_a, 32);
-        memcpy(dh_concat + 32, dh2_a, 32);
-        memcpy(dh_concat + 64, dh3_a, 32);
-        memcpy(dh_concat + 96, dh4_a, 32);
+        uint8_t dh_concat[32*4];
+        memcpy(dh_concat, dh1, 32);
+        memcpy(dh_concat + 32, dh2, 32);
+        memcpy(dh_concat + 32 * 2 , dh3, 32);
+        memcpy(dh_concat + 32 * 3, dh4, 32);
 
         // SK = KDF(DH1 || DH2 || DH3 || DH4)
         scrypt_blake2b (SK, sizeof SK, Domain, 32, dh_concat, sizeof dh_concat, 10);
@@ -248,10 +248,10 @@ public:
 
         // Alice deletes her ephemeral private key and the DH outputs
         randombytes_buf(EK_As.b, 32);
-        randombytes_buf(dh1_a, 32);
-        randombytes_buf(dh2_a, 32);
-        randombytes_buf(dh3_a, 32);
-        randombytes_buf(dh4_a, 32);
+        randombytes_buf(dh1, 32);
+        randombytes_buf(dh2, 32);
+        randombytes_buf(dh3, 32);
+        randombytes_buf(dh4, 32);
 
         // Alice calculates the associated data AD that contains identity information for both parties
         // AD = IK_A || AK_B
