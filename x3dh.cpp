@@ -61,8 +61,6 @@ public:
     }
 };
 
-int c_equal(const unsigned char *mac1, const unsigned char *mac2, size_t n);
-
 class Bob {
 private:
     Cu25519Sec IK_Bs;  // identity key
@@ -187,7 +185,7 @@ public:
     InitialMessage msg;
 
     // init alice using the private key
-    Alice(const char ika_sec[]){
+    explicit Alice(const char ika_sec[]){
         std::vector<uint8_t> tmp;
         const char *last;
 
@@ -202,7 +200,7 @@ public:
     }
 
     // display public key
-    void PrintFingerpring(){
+    void PrintFingerprint(){
         show_block(std::cout, "\nAlice IK public key", IK_Ap.b, 32);
     }
 
@@ -231,7 +229,6 @@ public:
          *  DH2 = DH(EK_A, IK_B)
          *  DH3 = DH(EK_A, SPK_B)
          *  DH4 = DH(EK_A, OPK_B)
-         *  SK = KDF(DH1 || DH2 || DH3 || DH4)
          */
         uint8_t dh1_a[32], dh2_a[32], dh3_a[32], dh4_a[32];
         cu25519_shared_secret(dh1_a, bundle->spk_p, IK_As);
@@ -245,6 +242,7 @@ public:
         memcpy(dh_concat + 64, dh3_a, 32);
         memcpy(dh_concat + 96, dh4_a, 32);
 
+        // SK = KDF(DH1 || DH2 || DH3 || DH4)
         scrypt_blake2b (SK, sizeof SK, Domain, 32, dh_concat, sizeof dh_concat, 10);
 
 
@@ -291,17 +289,6 @@ public:
 
 };
 
-// Check equality of the given vectors
-int c_equal(const unsigned char *mac1, const unsigned char *mac2, size_t n)
-{
-    size_t i;
-    unsigned int dif = 0;
-    for (i = 0; i < n; i++)
-        dif |= (mac1[i] ^ mac2[i]);
-    dif = (dif - 1) >> ((sizeof(unsigned int) * 8) - 1);
-    return (dif & 1);
-}
-
 void x3dh_key_exchange() {
     std::cout << "\nX3DH start, only public keys will be printed to screen.\n";
 
@@ -331,7 +318,7 @@ void x3dh_key_exchange() {
     // init Alice using the private key
     const char ika_sec[] = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
     Alice alice = Alice(ika_sec);
-    alice.PrintFingerpring();
+    alice.PrintFingerprint();
 
     /*
      ** Alice verifies the prekey SPK_Bp_sig and abort if verification fails

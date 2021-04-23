@@ -127,7 +127,15 @@ inline void leput16 (void *dest, uint16_t value)
 	((uint8_t*)dest)[1] = value >> 8;
 }
 
-
+inline int c_equal(const unsigned char *mac1, const unsigned char *mac2, size_t n)
+{
+    size_t i;
+    unsigned int dif = 0;
+    for (i = 0; i < n; i++)
+        dif |= (mac1[i] ^ mac2[i]);
+    dif = (dif - 1) >> ((sizeof(unsigned int) * 8) - 1);
+    return (dif & 1);
+}
 
 
 namespace amber {    namespace AMBER_SONAME  {
