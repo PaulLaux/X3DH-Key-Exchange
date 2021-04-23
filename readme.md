@@ -20,6 +20,10 @@ Notable changes from the spec:
 
 Both changes are for better compatibility with the cryptographic library (Amber).
 
+Other primitives: 
+ - `ChaCha20` for symetric encryption.
+ - `Curve25519` for public key cryptography.
+
 ## The protocol
 
 The following diagram shows the DH calculations between keys. Note that DH1 and DH2 provide mutual authentication, while DH3 and DH4 provide forward secrecy.
