@@ -12,7 +12,7 @@ X3DH establishes a shared secret key among two parties who mutually validate eac
 
 X3DH provides cryptographic deniability and forward secrecy. The protocol is intended for asynchronous contexts where one user (“Bob”) is offline but has published some information to an untrusted server. Another user (“Alice”) wants to use that data to send encrypted data to Bob and establish a shared secret key for future communication.
 
-The source for the protocol can be found in `x3dh.cpp`.
+The source for the protocol can be found in `x3dh.cpp` (https://github.com/PaulLaux/X3DH-Key-Exchange/blob/master/x3dh.cpp).
 
 Notable changes from the spec:
  - `scrypt_blake2b` is used as the key derivation function.
@@ -23,6 +23,8 @@ Both changes are for better compatibility with the cryptographic library (Amber)
 ## The protocol
 
 The following diagram shows the DH calculations between keys. Note that DH1 and DH2 provide mutual authentication, while DH3 and DH4 provide forward secrecy.
+
+![image](https://user-images.githubusercontent.com/3682187/115878596-5d53a080-a451-11eb-8729-17e077649357.png)
 
 For more information: https://www.signal.org/docs/specifications/x3dh/x3dh.pdf
 
