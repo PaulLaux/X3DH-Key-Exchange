@@ -15,6 +15,7 @@ CCDEBUG=-ftrapv -g
 CCOPTIMIZED=-O2 -march=native
 LIBS=-lz -lpthread
 BIN=bin
+$(shell mkdir -p $(BIN))
 INCLUDE=src
 VPATH=src:test:experimental
 

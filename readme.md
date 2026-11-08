@@ -15,12 +15,10 @@ X3DH provides cryptographic deniability and forward secrecy. The protocol is int
 The source for the protocol can be found in `x3dh.cpp` (https://github.com/PaulLaux/X3DH-Key-Exchange/blob/master/x3dh.cpp).
 
 Notable changes from the spec:
- - `scrypt_blake2b` is used as the key derivation function.
- - `qDSA` is used for signatures instead of `XEdDSA`.
-
-Both changes are for better compatibility with the cryptographic library (Amber).
+ - `qDSA` is used for signatures instead of `XEdDSA`, for better compatibility with the cryptographic library (Amber).
 
 Other primitives: 
+ - `HKDF-SHA512` as the key derivation function.
  - `ChaCha20` for symetric encryption.
  - `Curve25519` for public key cryptography.
 

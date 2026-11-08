@@ -1,6 +1,8 @@
 #include "src/group25519.hpp"
 #include "src/misc.hpp"
 #include "src/hasopt.hpp"
+#include "src/hkdf.hpp"
+#include "src/sha2.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -12,6 +14,7 @@ typedef struct {
     Cu25519Mon ik_p;            // Bob's identity key
     Cu25519Mon spk_p;           // Bob's signed pre-key
     uint8_t    spk_p_sig[64];   // Bob's signature on spk_bp using IK
+    bool       has_opk;         // false once the server has handed out the one-time pre-key
     Cu25519Mon opk_p;           // Bob's one time pre-key
 } PrekeyBundle;
 
@@ -20,6 +23,7 @@ typedef struct {
     Cu25519Mon ek_p;      // Alice’s ephemeral key
 
     Cu25519Mon spk_p;     // Bob's signed pre-key
+    bool       has_opk;   // whether Alice used a one-time pre-key
     Cu25519Mon opk_p;     // Bob's one time pre-key
 
     uint8_t ad_ct[80]; // An initial ciphertext encrypted using SK
@@ -39,23 +43,38 @@ void LoadKey(const char hex[], Cu25519Sec *key) {
     if (!ok) throw std::invalid_argument("error reading key");
 }
 
+// SK = HKDF-SHA512(F || DH1 || DH2 || DH3 [|| DH4]), F = 32 0xFF bytes, zero salt, info = Domain
+void KDF(uint8_t sk[32], const uint8_t *dh, size_t n) {
+    uint8_t F[32], salt[Sha512::hashlen] = {0};
+    memset(F, 0xFF, sizeof F);
+    Hkdf<Hmac<Sha512>> hkdf(salt, sizeof salt);
+    hkdf.update(F, sizeof F);
+    hkdf.update(dh, n);
+    hkdf.final(sk, 32, Domain, strlen(Domain));
+    crypto_bzero(&hkdf, sizeof hkdf);
+}
+
 class Server {
 private:
-    PrekeyBundle* bundle = nullptr;
+    PrekeyBundle bundle;
+    bool has_bundle = false;
     InitialMessage* message = nullptr;
 public:
 
     // store keys bundle
-    void SetBundle(PrekeyBundle *bundle) {
-        this->bundle = bundle;
+    void SetBundle(const PrekeyBundle *b) {
+        bundle = *b;
+        has_bundle = true;
     }
 
-    // retrieve keys bundle
-    PrekeyBundle* GetBundle() {
-        if (!this->bundle){
+    // retrieve keys bundle; the one-time pre-key is handed out only once
+    PrekeyBundle GetBundle() {
+        if (!has_bundle){
             throw std::logic_error (_("Unable to get bundle"));
         }
-        return bundle;
+        PrekeyBundle out = bundle;
+        bundle.has_opk = false;
+        return out;
     }
 
     // store initial message
@@ -121,6 +140,7 @@ public:
         bobs_bundle.ik_p = IK_Bp;
         bobs_bundle.spk_p = SPK_Bp;
         memcpy(bobs_bundle.spk_p_sig, SPK_Bp_sig, 64);
+        bobs_bundle.has_opk = true;
         bobs_bundle.opk_p = OPK_Bp;
 
         return &bobs_bundle;
@@ -134,18 +154,19 @@ public:
         show_block(std::cout, "*****Alice's identity key, as seen by Bob*****", message->ik_p.b, 32);
 
         // Alice must have used Bob's current prekeys
-        if (memcmp(message->spk_p.b, SPK_Bp.b, 32) || memcmp(message->opk_p.b, OPK_Bp.b, 32)) {
+        bool opk = message->has_opk;
+        if (memcmp(message->spk_p.b, SPK_Bp.b, 32) || (opk && memcmp(message->opk_p.b, OPK_Bp.b, 32))) {
             std::cout << "unknown prekey, Bob aborts\n";
             exit(1);
         }
 
-        // SK = KDF(DH1 || DH2 || DH3 || DH4), then delete the DH outputs
+        // SK = KDF(DH1 || DH2 || DH3 [|| DH4]), then delete the DH outputs
         uint8_t dh[32 * 4];
         cu25519_shared_secret(dh,      message->ik_p, SPK_Bs);
         cu25519_shared_secret(dh + 32, message->ek_p, IK_Bs);
         cu25519_shared_secret(dh + 64, message->ek_p, SPK_Bs);
-        cu25519_shared_secret(dh + 96, message->ek_p, OPK_Bs);
-        scrypt_blake2b (SK, sizeof SK, Domain, strlen(Domain), dh, sizeof dh, 10);
+        if (opk) cu25519_shared_secret(dh + 96, message->ek_p, OPK_Bs);
+        KDF(SK, dh, opk ? 128 : 96);
         crypto_bzero(dh, sizeof dh);
 
         Chakey chakey;
@@ -168,8 +189,10 @@ public:
         show_block(std::cout, "Bob successfully decrypted AD", ad_dec, sizeof ad_dec);
 
         // delete the used one-time prekey (public part too, so a replay is rejected)
-        crypto_bzero(&OPK_Bs, sizeof OPK_Bs);
-        crypto_bzero(&OPK_Bp, sizeof OPK_Bp);
+        if (opk) {
+            crypto_bzero(&OPK_Bs, sizeof OPK_Bs);
+            crypto_bzero(&OPK_Bp, sizeof OPK_Bp);
+        }
 
         std::cout << "\nSuccess! Secret key established\n";
     }
@@ -221,16 +244,17 @@ public:
          *  DH1 = DH(IK_A, SPK_B)
          *  DH2 = DH(EK_A, IK_B)
          *  DH3 = DH(EK_A, SPK_B)
-         *  DH4 = DH(EK_A, OPK_B)
+         *  DH4 = DH(EK_A, OPK_B)   (only if the bundle has a one-time pre-key)
          */
+        bool opk = bundle->has_opk;
         uint8_t dh[32 * 4];
         cu25519_shared_secret(dh,      bundle->spk_p, IK_As);
         cu25519_shared_secret(dh + 32, bundle->ik_p,  EK_As);
         cu25519_shared_secret(dh + 64, bundle->spk_p, EK_As);
-        cu25519_shared_secret(dh + 96, bundle->opk_p, EK_As);
+        if (opk) cu25519_shared_secret(dh + 96, bundle->opk_p, EK_As);
 
-        // SK = KDF(DH1 || DH2 || DH3 || DH4)
-        scrypt_blake2b (SK, sizeof SK, Domain, strlen(Domain), dh, sizeof dh, 10);
+        // SK = KDF(DH1 || DH2 || DH3 [|| DH4])
+        KDF(SK, dh, opk ? 128 : 96);
 
         // Alice deletes her ephemeral private key and the DH outputs
         crypto_bzero(&EK_As, sizeof EK_As);
@@ -264,6 +288,7 @@ public:
         msg.ik_p = IK_Ap;
         msg.ek_p = EK_Ap;
         msg.spk_p = bundle->spk_p;
+        msg.has_opk = opk;
         msg.opk_p = bundle->opk_p;
         memcpy(msg.ad_ct, cipher_text, ct_size);
         memcpy(&msg.nonce64, &nonce64, 8);
@@ -329,9 +354,9 @@ void x3dh_key_exchange() {
      */
 
     // Alice receives Bob's bundle
-    PrekeyBundle* b_bundle = server.GetBundle();
+    PrekeyBundle b_bundle = server.GetBundle();
 
-    InitialMessage* a_msg = alice.GenerateInitialMessage(b_bundle);
+    InitialMessage* a_msg = alice.GenerateInitialMessage(&b_bundle);
 
     server.SendInitialMessage(a_msg);
 
