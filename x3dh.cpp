@@ -38,6 +38,7 @@ const char *Sig_Domain ="X3DH SPK_BP_SIG";
 // parse a 32-byte hex secret key, throw on malformed input
 void LoadKey(const char hex[], Cu25519Sec *key) {
     std::vector<uint8_t> tmp;
+    tmp.reserve(32);  // no reallocation, so no unwiped copies of the key are freed
     const char *last;
     bool ok = read_block(hex, &last, tmp) >= 0 && !*last && tmp.size() == 32;
     if (ok) memcpy(key->b, tmp.data(), 32);
