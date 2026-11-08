@@ -45,6 +45,13 @@ void LoadKey(const char hex[], Cu25519Sec *key) {
     if (!ok) throw std::invalid_argument("error reading key");
 }
 
+// wipes a buffer when it goes out of scope, also when an exception is thrown
+struct Wipe {
+    void *p;
+    size_t n;
+    ~Wipe() { crypto_bzero(p, n); }
+};
+
 // SK = HKDF-SHA512(F || DH1 || DH2 || DH3 [|| DH4]), F = 32 0xFF bytes, zero salt, info = Domain
 void KDF(uint8_t sk[32], const uint8_t *dh, size_t n) {
     uint8_t F[32], salt[Sha512::hashlen] = {0};
@@ -165,19 +172,17 @@ public:
 
         // Alice must have used Bob's current prekeys
         bool opk = message->has_opk;
-        if (memcmp(message->spk_p.b, SPK_Bp.b, 32) || (opk && memcmp(message->opk_p.b, OPK_Bp.b, 32))) {
-            std::cout << "unknown prekey, Bob aborts\n";
-            exit(1);
-        }
+        if (memcmp(message->spk_p.b, SPK_Bp.b, 32) || (opk && memcmp(message->opk_p.b, OPK_Bp.b, 32)))
+            throw std::runtime_error("unknown prekey, Bob aborts");
 
-        // SK = KDF(DH1 || DH2 || DH3 [|| DH4]), then delete the DH outputs
+        // SK = KDF(DH1 || DH2 || DH3 [|| DH4]); the DH outputs are deleted on return
         uint8_t dh[32 * 4];
+        Wipe wipe_dh = {dh, sizeof dh};
         cu25519_shared_secret(dh,      message->ik_p, SPK_Bs);
         cu25519_shared_secret(dh + 32, message->ek_p, IK_Bs);
         cu25519_shared_secret(dh + 64, message->ek_p, SPK_Bs);
         if (opk) cu25519_shared_secret(dh + 96, message->ek_p, OPK_Bs);
         KDF(SK, dh, opk ? 128 : 96);
-        crypto_bzero(dh, sizeof dh);
 
         // AD = IK_A || IK_B; decryption fails unless Alice used the same AD and SK
         uint8_t ad[64];
@@ -191,8 +196,7 @@ public:
         crypto_bzero(&chakey, sizeof chakey);
         if (errc) {
             crypto_bzero(SK, sizeof SK);
-            std::cout << "decryption error, Bob aborts\n";
-            exit(1);
+            throw std::runtime_error("decryption error, Bob aborts");
         }
         std::cout << "Bob decrypted Alice's message: " << text << "\n";
 
@@ -239,15 +243,14 @@ public:
         std::cout << "Alice got Bob's bundle:\n";
 
         // Alice verifies the prekey SPK_Bp_sig and abort if verification fails
-        int errc = curverify(Sig_Domain, bundle->spk_p.b, 32, bundle->spk_p_sig, bundle->ik_p.b);
-        if (errc) {
-            format(std::cout, "signature check fails, Alice aborts\n");
-            exit(1);
-        }
+        if (curverify(Sig_Domain, bundle->spk_p.b, 32, bundle->spk_p_sig, bundle->ik_p.b))
+            throw std::runtime_error("signature check fails, Alice aborts");
         format(std::cout, "SPK_Bp signature verifies successfully\n");
 
         // Alice then generates an ephemeral key pair with public key EK_A.
+        // She deletes the ephemeral private key and the DH outputs on return.
         Cu25519Sec EK_As;
+        Wipe wipe_ek = {&EK_As, sizeof EK_As};
         Cu25519Mon EK_Ap;
         randombytes_buf(EK_As.b, 32);
         cu25519_generate(&EK_As, &EK_Ap);
@@ -262,6 +265,7 @@ public:
          */
         bool opk = bundle->has_opk;
         uint8_t dh[32 * 4];
+        Wipe wipe_dh = {dh, sizeof dh};
         cu25519_shared_secret(dh,      bundle->spk_p, IK_As);
         cu25519_shared_secret(dh + 32, bundle->ik_p,  EK_As);
         cu25519_shared_secret(dh + 64, bundle->spk_p, EK_As);
@@ -269,10 +273,6 @@ public:
 
         // SK = KDF(DH1 || DH2 || DH3 [|| DH4])
         KDF(SK, dh, opk ? 128 : 96);
-
-        // Alice deletes her ephemeral private key and the DH outputs
-        crypto_bzero(&EK_As, sizeof EK_As);
-        crypto_bzero(dh, sizeof dh);
 
         // Alice calculates the associated data AD that contains identity information for both parties
         // AD = IK_A || IK_B

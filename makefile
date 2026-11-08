@@ -45,6 +45,10 @@ lib%.a:
 
 all: x3dh
 
+bin/x3dh.o: x3dh.cpp src/group25519.hpp src/field25519.hpp src/soname.hpp \
+    src/misc.hpp src/symmetric.hpp src/blake2.hpp src/hasopt.hpp \
+    src/hkdf.hpp src/sha2.hpp
+
 
 
 # Generated automatically. Do not edit beyond here.
