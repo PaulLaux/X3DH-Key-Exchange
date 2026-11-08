@@ -1,45 +1,49 @@
-# The X3DH key agreement protocol
+# X3DH Key Exchange
 
-_For educational purpuses only._
+A C++ implementation of Signal's [X3DH](https://www.signal.org/docs/specifications/x3dh/x3dh.pdf) (Extended Triple Diffie-Hellman) key agreement protocol, built on the [Amber](https://github.com/bernedogit/amber) crypto library.
 
-Spec: https://www.signal.org/docs/specifications/x3dh/x3dh.pdf
+> For educational purposes only.
 
-Created using bernedogit/Amber (https://github.com/bernedogit/amber).
+X3DH lets Alice agree on a shared secret with an offline Bob, using keys Bob published to a server. It provides mutual authentication, forward secrecy and deniability.
 
-An implementation of the “X3DH” (or “Extended Triple Diffie-Hellman”) key agreement protocol.
-
-X3DH establishes a shared secret key among two parties who mutually validate each other based on public keys.
-
-X3DH provides cryptographic deniability and forward secrecy. The protocol is intended for asynchronous contexts where one user (“Bob”) is offline but has published some information to an untrusted server. Another user (“Alice”) wants to use that data to send encrypted data to Bob and establish a shared secret key for future communication.
-
-The source for the protocol can be found in `x3dh.cpp` (https://github.com/PaulLaux/X3DH-Key-Exchange/blob/master/x3dh.cpp).
-
-Notable changes from the spec:
- - `qDSA` is used for signatures instead of `XEdDSA`, for better compatibility with the cryptographic library (Amber).
-
-Other primitives: 
- - `HKDF-SHA512` as the key derivation function.
- - `ChaCha20` for symetric encryption.
- - `Curve25519` for public key cryptography.
-
-## The protocol
-
-The following diagram shows the DH calculations between keys. Note that DH1 and DH2 provide mutual authentication, while DH3 and DH4 provide forward secrecy.
-
-![image](https://user-images.githubusercontent.com/3682187/115878596-5d53a080-a451-11eb-8729-17e077649357.png)
-
-For more information: https://www.signal.org/docs/specifications/x3dh/x3dh.pdf
-
-## Usage
+## Run
 
 ```bash
 make && ./x3dh
 ```
 
-## Tested on
+Needs `make` and a C++11 compiler. Tested on macOS (Apple clang 21); earlier versions were tested on Ubuntu 20.04 (g++ 9.3).
 
-Ubuntu Linux 20.04
+## How it works
 
-GNU Make 4.2.1
+The protocol is in [`x3dh.cpp`](x3dh.cpp); `src/` is Amber.
 
-g++ 9.3.0
+1. Bob uploads a prekey bundle: identity key `IK_B`, signed prekey `SPK_B` and its signature, one-time prekey `OPK_B`.
+2. Alice fetches it, verifies the signature, creates an ephemeral key `EK_A`, and derives `SK` from four DH outputs.
+3. Alice sends `IK_A`, `EK_A` and a first message encrypted with `SK`, with `AD = IK_A || IK_B` as associated data.
+4. Bob derives the same `SK`, decrypts the message and deletes `OPK_B`.
+
+Finally, both compare identity key fingerprints out of band.
+
+![DH calculations between Alice's and Bob's keys](https://user-images.githubusercontent.com/3682187/115878596-5d53a080-a451-11eb-8729-17e077649357.png)
+
+DH1 and DH2 provide mutual authentication; DH3 and DH4 provide forward secrecy.
+
+## Primitives
+
+| Purpose       | Primitive         |
+|---------------|-------------------|
+| Key agreement | X25519            |
+| Signatures    | qDSA              |
+| KDF           | HKDF-SHA512       |
+| Encryption    | ChaCha20-Poly1305 |
+
+## Differences from the spec
+
+- **qDSA instead of XEdDSA**: Amber supports it with X25519 keys directly.
+- **One one-time prekey**, handed out once; later bundles omit it and derive `SK` from three DH outputs, as the spec allows.
+- **Single process**: Alice, Bob and the server run in one program, with hardcoded identity keys.
+
+## License
+
+See [LICENSE.txt](LICENSE.txt).
