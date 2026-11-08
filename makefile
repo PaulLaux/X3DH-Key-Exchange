@@ -15,6 +15,7 @@ CCDEBUG=-ftrapv -g
 CCOPTIMIZED=-O2 -march=native
 LIBS=-lz -lpthread
 BIN=bin
+$(shell mkdir -p $(BIN))
 INCLUDE=src
 VPATH=src:test:experimental
 
@@ -43,6 +44,10 @@ lib%.a:
 
 
 all: x3dh
+
+bin/x3dh.o: x3dh.cpp src/group25519.hpp src/field25519.hpp src/soname.hpp \
+    src/misc.hpp src/symmetric.hpp src/blake2.hpp src/hasopt.hpp \
+    src/hkdf.hpp src/sha2.hpp
 
 
 
@@ -307,11 +312,11 @@ bin/group25519_test: \
     bin/hasopt.o bin/misc.o bin/symmetric.o bin/group25519.o  \
     bin/blake2.o
 
+x3dh: LIBS=-lpthread
 x3dh: \
     bin/sha2.o bin/poly1305.o bin/field25519.o  \
     bin/hasopt.o bin/misc.o bin/group25519.o  \
-    bin/blake2.o bin/keys.o bin/protobuf.o bin/blockbuf.o \
-    bin/symmetric-pic.o bin/noise.o bin/hkdf.o
+    bin/blake2.o bin/symmetric.o
 
 bin/group25519_test-pic: \
     bin/sha2-pic.o bin/poly1305-pic.o bin/group25519_test-pic.o  \
