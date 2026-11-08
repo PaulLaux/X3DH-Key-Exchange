@@ -6,19 +6,21 @@
 
 #include <iostream>
 #include <stdexcept>
-#include <string.h>
+#include <cstring>
 
 using namespace amber;
 
-typedef struct {
+struct PrekeyBundle {
     Cu25519Mon ik_p;            // Bob's identity key
     Cu25519Mon spk_p;           // Bob's signed pre-key
     uint8_t    spk_p_sig[64];   // Bob's signature on spk_bp using IK
     bool       has_opk;         // false once the server has handed out the one-time pre-key
     Cu25519Mon opk_p;           // Bob's one time pre-key
-} PrekeyBundle;
+};
 
-typedef struct {
+const char Greeting[] = "Hello Bob, this is Alice"; // Alice's first message
+
+struct InitialMessage {
     Cu25519Mon ik_p;      // Alice’s identity key
     Cu25519Mon ek_p;      // Alice’s ephemeral key
 
@@ -26,9 +28,9 @@ typedef struct {
     bool       has_opk;   // whether Alice used a one-time pre-key
     Cu25519Mon opk_p;     // Bob's one time pre-key
 
-    uint8_t ad_ct[80]; // An initial ciphertext encrypted using SK
+    uint8_t ct[sizeof Greeting + 16]; // Greeting encrypted with SK, AD as associated data (+16 byte tag)
     uint64_t nonce64;  // The nonce for the symmetric encryption
-} InitialMessage;
+};
 
 const char *Domain ="X3DH_DOMAIN";
 const char *Sig_Domain ="X3DH SPK_BP_SIG";
@@ -112,6 +114,14 @@ public:
         cu25519_generate(&IK_Bs, &IK_Bp);
     }
 
+    // delete all secret keys
+    ~Bob() {
+        crypto_bzero(&IK_Bs, sizeof IK_Bs);
+        crypto_bzero(&SPK_Bs, sizeof SPK_Bs);
+        crypto_bzero(&OPK_Bs, sizeof OPK_Bs);
+        crypto_bzero(SK, sizeof SK);
+    }
+
     // display public key
     void PrintFingerprint(){
         show_block(std::cout, "bob IK_B public key", IK_Bp.b, 32);
@@ -169,24 +179,22 @@ public:
         KDF(SK, dh, opk ? 128 : 96);
         crypto_bzero(dh, sizeof dh);
 
-        Chakey chakey;
-        load (&chakey, SK);
-        uint8_t ad_dec[64];
-        int errc = decrypt_one(ad_dec, message->ad_ct, 80, NULL, 0, chakey, message->nonce64);
-        crypto_bzero(&chakey, sizeof chakey);
-        if (errc) {
-            std::cout << "decryption error, Bob aborts\n";
-            exit(1);
-        }
-
+        // AD = IK_A || IK_B; decryption fails unless Alice used the same AD and SK
         uint8_t ad[64];
         memcpy(ad, message->ik_p.b, 32);
         memcpy(ad + 32, IK_Bp.b, 32);
-        if (!c_equal(ad, ad_dec, 64)) {
-            std::cout << "Failure! mismatched AD message, Bob aborts\n";
+
+        Chakey chakey;
+        load (&chakey, SK);
+        char text[sizeof Greeting];
+        int errc = decrypt_one((uint8_t*)text, message->ct, sizeof message->ct, ad, sizeof ad, chakey, message->nonce64);
+        crypto_bzero(&chakey, sizeof chakey);
+        if (errc) {
+            crypto_bzero(SK, sizeof SK);
+            std::cout << "decryption error, Bob aborts\n";
             exit(1);
         }
-        show_block(std::cout, "Bob successfully decrypted AD", ad_dec, sizeof ad_dec);
+        std::cout << "Bob decrypted Alice's message: " << text << "\n";
 
         // delete the used one-time prekey (public part too, so a replay is rejected)
         if (opk) {
@@ -213,6 +221,12 @@ public:
     explicit Alice(const char ika_sec[]){
         LoadKey(ika_sec, &IK_As);
         cu25519_generate(&IK_As, &IK_Ap);
+    }
+
+    // delete all secret keys
+    ~Alice() {
+        crypto_bzero(&IK_As, sizeof IK_As);
+        crypto_bzero(SK, sizeof SK);
     }
 
     // display public key
@@ -261,22 +275,12 @@ public:
         crypto_bzero(dh, sizeof dh);
 
         // Alice calculates the associated data AD that contains identity information for both parties
-        // AD = IK_A || AK_B
+        // AD = IK_A || IK_B
         uint8_t AD[64];
         memcpy(AD, IK_Ap.b, 32);
         memcpy(AD + 32, bundle->ik_p.b, 32);
 
         show_block(std::cout, "*****Bob's identity key, as seen by Alice*****", bundle->ik_p.b, 32);
-
-        // An initial ciphertext encrypted with some AEAD encryption scheme using AD as associated data and using an encryption key SK
-        const uint ct_size = sizeof AD + 16;
-        uint8_t cipher_text[ct_size];
-        Chakey key;
-        load (&key, SK);
-        uint64_t nonce64;
-        randombytes_buf(&nonce64, sizeof nonce64);
-        encrypt_one (cipher_text, AD, sizeof AD, NULL, 0, key, nonce64);
-        crypto_bzero(&key, sizeof key);
 
         /*
          * Alice then sends Bob an initial message containing:
@@ -290,8 +294,13 @@ public:
         msg.spk_p = bundle->spk_p;
         msg.has_opk = opk;
         msg.opk_p = bundle->opk_p;
-        memcpy(msg.ad_ct, cipher_text, ct_size);
-        memcpy(&msg.nonce64, &nonce64, 8);
+
+        // An initial ciphertext encrypted with an AEAD scheme using AD as associated data and SK as the key
+        Chakey key;
+        load (&key, SK);
+        randombytes_buf(&msg.nonce64, sizeof msg.nonce64);
+        encrypt_one (msg.ct, (const uint8_t*)Greeting, sizeof Greeting, AD, sizeof AD, key, msg.nonce64);
+        crypto_bzero(&key, sizeof key);
 
         return &msg;
     }
@@ -308,7 +317,7 @@ void x3dh_key_exchange() {
     // Bob's identity key secret IK_B:
     const char ikb_sec[] = "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb";
 
-    Bob bob = Bob(ikb_sec);
+    Bob bob(ikb_sec);
     bob.PrintFingerprint();
 
     /*
@@ -326,7 +335,7 @@ void x3dh_key_exchange() {
 
     // init Alice using the private key
     const char ika_sec[] = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
-    Alice alice = Alice(ika_sec);
+    Alice alice(ika_sec);
     alice.PrintFingerprint();
 
     /*

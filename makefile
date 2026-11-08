@@ -308,11 +308,11 @@ bin/group25519_test: \
     bin/hasopt.o bin/misc.o bin/symmetric.o bin/group25519.o  \
     bin/blake2.o
 
+x3dh: LIBS=-lpthread
 x3dh: \
     bin/sha2.o bin/poly1305.o bin/field25519.o  \
     bin/hasopt.o bin/misc.o bin/group25519.o  \
-    bin/blake2.o bin/keys.o bin/protobuf.o bin/blockbuf.o \
-    bin/symmetric-pic.o bin/noise.o bin/hkdf.o
+    bin/blake2.o bin/symmetric.o
 
 bin/group25519_test-pic: \
     bin/sha2-pic.o bin/poly1305-pic.o bin/group25519_test-pic.o  \
