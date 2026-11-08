@@ -3,6 +3,7 @@
 #include "src/hasopt.hpp"
 
 #include <iostream>
+#include <stdexcept>
 #include <string.h>
 
 using namespace amber;
@@ -28,10 +29,20 @@ typedef struct {
 const char *Domain ="X3DH_DOMAIN";
 const char *Sig_Domain ="X3DH SPK_BP_SIG";
 
+// parse a 32-byte hex secret key, throw on malformed input
+void LoadKey(const char hex[], Cu25519Sec *key) {
+    std::vector<uint8_t> tmp;
+    const char *last;
+    bool ok = read_block(hex, &last, tmp) >= 0 && !*last && tmp.size() == 32;
+    if (ok) memcpy(key->b, tmp.data(), 32);
+    crypto_bzero(tmp.data(), tmp.size());
+    if (!ok) throw std::invalid_argument("error reading key");
+}
+
 class Server {
 private:
-    PrekeyBundle* bundle;
-    InitialMessage* message;
+    PrekeyBundle* bundle = nullptr;
+    InitialMessage* message = nullptr;
 public:
 
     // store keys bundle
@@ -78,17 +89,7 @@ public:
 
     // init bob using his private key
     explicit Bob(const char ikb_sec[]){
-        // load key into IK_Bs
-        std::vector<uint8_t> tmp;
-        const char *last;
-
-        read_block(ikb_sec, &last, tmp);
-        if (*last || tmp.size() != 32) {
-            std::cout << "error reading key\n";
-            return;
-        }
-        memcpy(IK_Bs.b, &tmp[0], 32);
-
+        LoadKey(ikb_sec, &IK_Bs);
         cu25519_generate(&IK_Bs, &IK_Bp);
     }
 
@@ -132,44 +133,45 @@ public:
 
         show_block(std::cout, "*****Alice's identity key, as seen by Bob*****", message->ik_p.b, 32);
 
-        // calculate the parallel DH keys
-        uint8_t dh1_b[32], dh2_b[32], dh3_b[32], dh4_b[32];
-        cu25519_shared_secret(dh1_b, message->ik_p, SPK_Bs);
-        cu25519_shared_secret(dh2_b, message->ek_p, IK_Bs);
-        cu25519_shared_secret(dh3_b, message->ek_p, SPK_Bs);
-        cu25519_shared_secret(dh4_b, message->ek_p, OPK_Bs);
+        // Alice must have used Bob's current prekeys
+        if (memcmp(message->spk_p.b, SPK_Bp.b, 32) || memcmp(message->opk_p.b, OPK_Bp.b, 32)) {
+            std::cout << "unknown prekey, Bob aborts\n";
+            exit(1);
+        }
 
-        uint8_t dh_concat_b[128];
-        memcpy(dh_concat_b, dh1_b, 32);
-        memcpy(dh_concat_b + 32, dh2_b, 32);
-        memcpy(dh_concat_b + 64, dh3_b, 32);
-        memcpy(dh_concat_b + 96, dh4_b, 32);
-
-        scrypt_blake2b (SK, sizeof SK, Domain, 32, dh_concat_b, sizeof dh_concat_b, 10);
-
+        // SK = KDF(DH1 || DH2 || DH3 || DH4), then delete the DH outputs
+        uint8_t dh[32 * 4];
+        cu25519_shared_secret(dh,      message->ik_p, SPK_Bs);
+        cu25519_shared_secret(dh + 32, message->ek_p, IK_Bs);
+        cu25519_shared_secret(dh + 64, message->ek_p, SPK_Bs);
+        cu25519_shared_secret(dh + 96, message->ek_p, OPK_Bs);
+        scrypt_blake2b (SK, sizeof SK, Domain, strlen(Domain), dh, sizeof dh, 10);
+        crypto_bzero(dh, sizeof dh);
 
         Chakey chakey;
         load (&chakey, SK);
-
         uint8_t ad_dec[64];
         int errc = decrypt_one(ad_dec, message->ad_ct, 80, NULL, 0, chakey, message->nonce64);
+        crypto_bzero(&chakey, sizeof chakey);
         if (errc) {
-            std::cout << "decryption error, Bob abort";
+            std::cout << "decryption error, Bob aborts\n";
             exit(1);
         }
 
         uint8_t ad[64];
         memcpy(ad, message->ik_p.b, 32);
         memcpy(ad + 32, IK_Bp.b, 32);
-        show_block(std::cout, "Bob successfully decrypted AD", ad, sizeof ad);
-
-
-        if (c_equal(ad, ad_dec, 64)){
-            std::cout << "\nSuccess! Secret key established\n";
-        } else {
-            std::cout << "Failure! mismatched AD message, Bob abort\n";
+        if (!c_equal(ad, ad_dec, 64)) {
+            std::cout << "Failure! mismatched AD message, Bob aborts\n";
             exit(1);
         }
+        show_block(std::cout, "Bob successfully decrypted AD", ad_dec, sizeof ad_dec);
+
+        // delete the used one-time prekey (public part too, so a replay is rejected)
+        crypto_bzero(&OPK_Bs, sizeof OPK_Bs);
+        crypto_bzero(&OPK_Bp, sizeof OPK_Bp);
+
+        std::cout << "\nSuccess! Secret key established\n";
     }
 };
 
@@ -186,16 +188,7 @@ public:
 
     // init alice using the private key
     explicit Alice(const char ika_sec[]){
-        std::vector<uint8_t> tmp;
-        const char *last;
-
-        // load key into IK_As
-        read_block(ika_sec, &last, tmp);
-        if (*last || tmp.size() != 32) {
-            std::cout << "error reading key\n";
-            return;
-        }
-        memcpy(IK_As.b, &tmp[0], 32);
+        LoadKey(ika_sec, &IK_As);
         cu25519_generate(&IK_As, &IK_Ap);
     }
 
@@ -230,28 +223,18 @@ public:
          *  DH3 = DH(EK_A, SPK_B)
          *  DH4 = DH(EK_A, OPK_B)
          */
-        uint8_t dh1[32], dh2[32], dh3[32], dh4[32];
-        cu25519_shared_secret(dh1, bundle->spk_p, IK_As);
-        cu25519_shared_secret(dh2, bundle->ik_p, EK_As);
-        cu25519_shared_secret(dh3, bundle->spk_p, EK_As);
-        cu25519_shared_secret(dh4, bundle->opk_p, EK_As);
-
-        uint8_t dh_concat[32*4];
-        memcpy(dh_concat, dh1, 32);
-        memcpy(dh_concat + 32, dh2, 32);
-        memcpy(dh_concat + 32 * 2 , dh3, 32);
-        memcpy(dh_concat + 32 * 3, dh4, 32);
+        uint8_t dh[32 * 4];
+        cu25519_shared_secret(dh,      bundle->spk_p, IK_As);
+        cu25519_shared_secret(dh + 32, bundle->ik_p,  EK_As);
+        cu25519_shared_secret(dh + 64, bundle->spk_p, EK_As);
+        cu25519_shared_secret(dh + 96, bundle->opk_p, EK_As);
 
         // SK = KDF(DH1 || DH2 || DH3 || DH4)
-        scrypt_blake2b (SK, sizeof SK, Domain, 32, dh_concat, sizeof dh_concat, 10);
-
+        scrypt_blake2b (SK, sizeof SK, Domain, strlen(Domain), dh, sizeof dh, 10);
 
         // Alice deletes her ephemeral private key and the DH outputs
-        randombytes_buf(EK_As.b, 32);
-        randombytes_buf(dh1, 32);
-        randombytes_buf(dh2, 32);
-        randombytes_buf(dh3, 32);
-        randombytes_buf(dh4, 32);
+        crypto_bzero(&EK_As, sizeof EK_As);
+        crypto_bzero(dh, sizeof dh);
 
         // Alice calculates the associated data AD that contains identity information for both parties
         // AD = IK_A || AK_B
@@ -269,6 +252,7 @@ public:
         uint64_t nonce64;
         randombytes_buf(&nonce64, sizeof nonce64);
         encrypt_one (cipher_text, AD, sizeof AD, NULL, 0, key, nonce64);
+        crypto_bzero(&key, sizeof key);
 
         /*
          * Alice then sends Bob an initial message containing:
@@ -370,6 +354,11 @@ void x3dh_key_exchange() {
 }
 
 int main() {
-    x3dh_key_exchange();
+    try {
+        x3dh_key_exchange();
+    } catch (const std::exception &e) {
+        std::cerr << "error: " << e.what() << '\n';
+        return 1;
+    }
 }
 
